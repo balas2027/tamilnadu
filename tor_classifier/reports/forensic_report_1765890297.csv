@@ -1,0 +1,2 @@
+finding_id,analysis_timestamp,probable_origin_ip,origin_confidence,entry_guard_ip,entry_guard_nickname,middle_relay_ip,middle_relay_nickname,exit_node_ip,exit_node_nickname,activity_purpose,circuit_id,local_entry_formatted,composite_confidence_score,identity_score,fingerprint_score,pattern_score,log_reference_pointer,classification
+TOR-1765890297-001,2025-12-16T18:34:57.723057,192.168.1.3,0.0,,,,,,,HS_VANGUARDS,,2025-12-16 18:34:46,0.875,0.0,0.0,0.0,"Live TOR Control Port, Circuit #146",TOR_TRAFFIC

@@ -1,0 +1,45 @@
+{
+  "report_metadata": {
+    "case_id": "TOR-TRACE-1765890068",
+    "analyst": "Automated Forensic Analyzer",
+    "description": "TOR Circuit Origin Trace",
+    "generated_at": "2025-12-16T18:31:08.749367",
+    "tool_version": "TOR-Forensics-v1.0"
+  },
+  "summary": {
+    "total_findings": 1,
+    "high_confidence_count": 1,
+    "medium_confidence_count": 0,
+    "low_confidence_count": 0,
+    "unique_origin_ips": [
+      "192.168.1.3"
+    ],
+    "unique_entry_guards": []
+  },
+  "findings": [
+    {
+      "finding_id": "TOR-1765890068-001",
+      "analysis_timestamp": "2025-12-16T18:31:08.749519",
+      "probable_origin_ip": "192.168.1.3",
+      "origin_confidence": 0.0,
+      "entry_guard_ip": "",
+      "entry_guard_nickname": "",
+      "entry_guard_port": 0,
+      "middle_relay_ip": "",
+      "middle_relay_nickname": "",
+      "exit_node_ip": "",
+      "exit_node_nickname": "",
+      "activity_purpose": "HS_CLIENT_REND",
+      "circuit_id": "",
+      "local_entry_timestamp": 1765890046.1467578,
+      "local_entry_formatted": "2025-12-16 18:30:46",
+      "composite_confidence_score": 0.875,
+      "identity_score": 0.0,
+      "fingerprint_score": 0.0,
+      "pattern_score": 0.0,
+      "log_reference_pointer": "Live TOR Control Port, Circuit #56",
+      "analyst_notes": "",
+      "classification": "TOR_TRAFFIC"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+# ============================================================
+# TOR Hidden Service Configuration for TOR Traffic Analyzer
+# ============================================================
+#
+# This configuration file sets up TOR to expose the 
+# TOR Traffic Analyzer Streamlit app as a Hidden Service
+# (Onion Service) on the TOR network.
+#
+# HOW TO USE:
+# 1. Find your TOR configuration file (torrc):
+#    - TOR Browser: TorBrowser\Browser\TorBrowser\Data\Tor\torrc
+#    - Standalone TOR: C:\Users\<username>\AppData\Roaming\tor\torrc
+#    - Linux: /etc/tor/torrc
+#
+# 2. Add the lines below to your torrc file
+#
+# 3. Restart TOR (or TOR Browser)
+#
+# 4. TOR will generate your .onion address in:
+#    <HiddenServiceDir>/hostname
+#
+# ============================================================
+
+# COPY BELOW THIS LINE INTO YOUR torrc:
+# ============================================================
+
+# Enable Control Port for app integration
+ControlPort 9051
+CookieAuthentication 1
+
+# Hidden Service Configuration
+# Windows path (create this folder first):
+HiddenServiceDir C:\Users\Balaskanthan\Downloads\tamilnadu\tor_classifier\hidden_service
+
+# Map external port 80 to local Streamlit on 8501
+HiddenServicePort 80 127.0.0.1:8501
+
+# Optional: Map HTTPS port if using SSL
+# HiddenServicePort 443 127.0.0.1:8501
+
+# ============================================================
+# IMPORTANT NOTES:
+# ============================================================
+#
+# After restarting TOR, check the hostname file:
+# C:\Users\Balaskanthan\Downloads\tamilnadu\tor_classifier\hidden_service\hostname
+#
+# This contains your unique .onion address, e.g.:
+# abc123xyz456def789.onion
+#
+# Users can then access the analyzer at:
+# http://abc123xyz456def789.onion (via TOR Browser)
+#
+# ============================================================

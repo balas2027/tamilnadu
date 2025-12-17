@@ -1,0 +1,36 @@
+{
+  "exported_at": "2025-12-16 18:54:51",
+  "statistics": {
+    "total": 1,
+    "unacknowledged": 1,
+    "by_severity": {
+      "LOW": 0,
+      "MEDIUM": 0,
+      "HIGH": 1,
+      "CRITICAL": 0
+    },
+    "by_type": {
+      "HIDDEN_SERVICE_CONNECTION": 1
+    },
+    "log_file": "./alerts\\alerts_1765891253.jsonl"
+  },
+  "alerts": [
+    {
+      "alert_id": "ALERT-1765891487-0001",
+      "type": "HIDDEN_SERVICE_CONNECTION",
+      "severity": "HIGH",
+      "timestamp": 1765891487.2147484,
+      "timestamp_formatted": "2025-12-16 18:54:47",
+      "title": "Hidden Service Connection Detected",
+      "description": "Device at 192.168.1.100 connected to TOR Hidden Service via Circuit #TEST-001. Purpose: HS_CLIENT_REND. Confidence: 85.0%",
+      "source_ip": "192.168.1.100",
+      "destination_ip": "",
+      "circuit_id": "TEST-001",
+      "confidence": 0.85,
+      "acknowledged": false,
+      "metadata": {
+        "purpose": "HS_CLIENT_REND"
+      }
+    }
+  ]
+}
