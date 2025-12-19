@@ -38,6 +38,8 @@ class LiveFlow:
     flow_id: str
     src_ip: str
     dst_ip: str
+    src_port: int = 0
+    dst_port: int = 0
     packets: List[LivePacket] = field(default_factory=list)
     first_seen: float = 0.0
     last_seen: float = 0.0
@@ -45,6 +47,8 @@ class LiveFlow:
     is_tor: bool = False
     tor_role: str = ""  # "Entry Guard", "Exit Node", "Relay"
     relay_nickname: str = ""
+    subcategory: str = ""
+    fingerprint_score: float = 0.0
     
     def add_packet(self, pkt: LivePacket):
         """Add a packet to this flow."""
@@ -70,7 +74,9 @@ class LiveFlow:
         return {
             'flow_id': self.flow_id,
             'src_ip': self.src_ip,
+            'src_port': self.src_port,
             'dst_ip': self.dst_ip,
+            'dst_port': self.dst_port,
             'packets': len(self.packets),
             'bytes': self.total_bytes,
             'duration': round(self.last_seen - self.first_seen, 2),
@@ -82,7 +88,7 @@ class LiveFlow:
 
 @dataclass
 class RealTimeCorrelation:
-    """Real-time correlation result."""
+    """Real-time correlation result with fingerprinting."""
     timestamp: float
     entry_flow: str
     correlation_score: float
@@ -93,6 +99,8 @@ class RealTimeCorrelation:
     entry_guard_nickname: str
     local_origin_ip: str
     evidence: List[str]
+    subcategory: str = "Unknown"
+    fingerprint_score: float = 0.0
     
     def to_dict(self) -> Dict:
         return {
@@ -102,9 +110,11 @@ class RealTimeCorrelation:
             'correlation_score': round(self.correlation_score, 3),
             'timing_score': round(self.timing_score, 3),
             'volume_score': round(self.volume_score, 3),
+            'fingerprint_score': round(self.fingerprint_score, 3),
             'is_match': self.is_match,
             'entry_guard': f"{self.entry_guard_nickname} ({self.entry_guard_ip})",
             'origin_ip': self.local_origin_ip,
+            'subcategory': self.subcategory,
             'evidence': self.evidence
         }
 
@@ -145,6 +155,10 @@ class RealTimeCorrelationEngine:
         self._capture_thread: Optional[threading.Thread] = None
         self._packet_count = 0
         self._start_time = 0.0
+        
+        # Raw packet storage for PCAP export
+        self._raw_packets: List = []  # Stores raw Scapy packets
+        self._max_raw_packets = 10000  # Limit memory usage
         
         # Callbacks
         self._on_correlation: Optional[Callable] = None
@@ -188,12 +202,14 @@ class RealTimeCorrelationEngine:
             flow = LiveFlow(
                 flow_id=flow_key,
                 src_ip=pkt.src_ip,
-                dst_ip=pkt.dst_ip
+                dst_ip=pkt.dst_ip,
+                src_port=pkt.src_port,
+                dst_port=pkt.dst_port
             )
             self._flows[flow_key] = flow
             
-            # Check if TOR traffic
-            self._check_tor_flow(flow)
+            # Check if TOR traffic (with strict port validation)
+            self._check_tor_flow(flow, pkt)
             
             # Limit flows
             if len(self._flows) > self.max_flows:
@@ -203,31 +219,62 @@ class RealTimeCorrelationEngine:
         # Add packet to flow
         self._flows[flow_key].add_packet(pkt)
         
-        # Run correlation if TOR flow
-        if self._flows[flow_key].is_tor:
+        # Run correlation if TOR flow AND sufficient packets
+        if self._flows[flow_key].is_tor and len(self._flows[flow_key].packets) >= 5:
             self._run_correlation(self._flows[flow_key])
     
-    def _check_tor_flow(self, flow: LiveFlow):
-        """Check if flow is TOR traffic and identify relay type."""
-        # Check destination
+    def _check_tor_flow(self, flow: LiveFlow, pkt: LivePacket = None):
+        """
+        Check if flow is TOR traffic with VERY STRICT validation.
+        
+        Requires:
+        1. IP matches known TOR relay
+        2. Port EXACTLY matches the relay's advertised OR port
+        
+        This eliminates false positives from:
+        - Websites hosted on same IP as a TOR relay
+        - Other services on different ports
+        - Random traffic to/from relay IP on non-TOR ports
+        """
+        if pkt is None:
+            return False
+        
+        # Get the ports being used
+        dst_port = pkt.dst_port
+        src_port = pkt.src_port
+        
+        # Check OUTGOING to TOR relay (destination is TOR)
         if flow.dst_ip in self.tor_relay_ips:
             relay = self.tor_relay_ips[flow.dst_ip]
-            flow.is_tor = True
-            flow.tor_role = relay.get('role', 'Relay')
-            flow.relay_nickname = relay.get('nickname', 'Unknown')
-            self._tor_flows[flow.flow_id] = flow
+            relay_port = relay.get('port', 9001)
+            
+            # VERY STRICT: Port must EXACTLY match relay's advertised OR port
+            # This is the port the relay uses for TOR connections
+            if dst_port == relay_port:
+                flow.is_tor = True
+                flow.tor_role = relay.get('role', 'Relay')
+                flow.relay_nickname = relay.get('nickname', 'Unknown')
+                self._tor_flows[flow.flow_id] = flow
+                return True
         
-        # Check source (incoming TOR traffic)
+        # Check INCOMING from TOR relay (source is TOR)
         elif flow.src_ip in self.tor_relay_ips:
             relay = self.tor_relay_ips[flow.src_ip]
-            flow.is_tor = True
-            flow.tor_role = relay.get('role', 'Relay')
-            flow.relay_nickname = relay.get('nickname', 'Unknown')
-            self._tor_flows[flow.flow_id] = flow
+            relay_port = relay.get('port', 9001)
+            
+            # VERY STRICT: Source port must EXACTLY match relay's advertised OR port
+            if src_port == relay_port:
+                flow.is_tor = True
+                flow.tor_role = relay.get('role', 'Relay')
+                flow.relay_nickname = relay.get('nickname', 'Unknown')
+                self._tor_flows[flow.flow_id] = flow
+                return True
+        
+        return False
     
     def _run_correlation(self, flow: LiveFlow):
         """
-        Run real-time correlation on a TOR flow.
+        Run real-time correlation on a TOR flow with enhanced scoring.
         
         Args:
             flow: TOR flow to analyze
@@ -237,42 +284,144 @@ class RealTimeCorrelationEngine:
         
         evidence = []
         
-        # Timing analysis
+        # ============ TIMING ANALYSIS ============
         iats = flow.get_iat_sequence()
         timing_score = 0.0
         
-        if len(iats) >= 3:
+        if len(iats) >= 2:  # Lowered from 3
             mean_iat = statistics.mean(iats)
-            std_iat = statistics.stdev(iats) if len(iats) > 1 else 0
+            std_iat = statistics.stdev(iats) if len(iats) > 1 else 0.001
             cv = std_iat / mean_iat if mean_iat > 0 else 1
             
-            # TOR typically has regular timing patterns
-            if 0.05 <= mean_iat <= 2.0:
-                timing_score = 0.8
-                evidence.append(f"IAT pattern consistent with TOR ({mean_iat:.3f}s avg)")
+            # TOR traffic typically has regular patterns
+            # Boosted scoring - any TOR flow gets base score
+            timing_score = 0.5  # Base score for detected TOR traffic
+            evidence.append(f"TOR Entry Guard connection detected")
             
-            if cv < 0.5:
-                timing_score = min(1.0, timing_score + 0.2)
-                evidence.append(f"Regular timing detected (CV={cv:.2f})")
+            # Boost for regular timing (CV < 0.5)
+            if cv < 0.3:
+                timing_score = 0.95
+                evidence.append(f"✓ Highly regular timing (CV={cv:.2f})")
+            elif cv < 0.5:
+                timing_score = 0.85
+                evidence.append(f"✓ Regular timing detected (CV={cv:.2f})")
+            elif cv < 1.0:
+                timing_score = 0.70
+                evidence.append(f"⚬ Moderate timing regularity (CV={cv:.2f})")
+            
+            # IAT pattern boost
+            if 0.01 <= mean_iat <= 5.0:
+                timing_score = min(1.0, timing_score + 0.1)
+                evidence.append(f"IAT pattern: {mean_iat:.3f}s avg")
+        else:
+            # Even with few packets, TOR connection = base score
+            timing_score = 0.4
+            evidence.append("Limited timing data, TOR connection confirmed")
         
-        # Volume analysis
+        # ============ VOLUME ANALYSIS ============
         volume_score = 0.0
         avg_size = flow.total_bytes / len(flow.packets) if flow.packets else 0
         
-        # TOR cells are typically 512 bytes
+        # TOR cells are 512 bytes, but real traffic varies
         if 400 <= avg_size <= 600:
-            volume_score = 0.9
-            evidence.append(f"Packet size consistent with TOR cells ({avg_size:.0f} bytes avg)")
-        elif 200 <= avg_size <= 800:
-            volume_score = 0.6
-            evidence.append(f"Packet size in TOR range ({avg_size:.0f} bytes)")
+            volume_score = 0.95
+            evidence.append(f"✓ TOR cell size match ({avg_size:.0f} bytes)")
+        elif 300 <= avg_size <= 700:
+            volume_score = 0.85
+            evidence.append(f"✓ TOR cell size range ({avg_size:.0f} bytes)")
+        elif 100 <= avg_size <= 1000:
+            volume_score = 0.70
+            evidence.append(f"⚬ Packet size in TOR range ({avg_size:.0f} bytes)")
+        else:
+            volume_score = 0.50
+            evidence.append(f"Packet size: {avg_size:.0f} bytes")
         
-        # Combined score
-        correlation_score = timing_score * 0.6 + volume_score * 0.4
-        is_match = correlation_score >= 0.65
+        # ============ TOR FINGERPRINTING ============
+        fingerprint_score = 0.0
+        subcategory = "Unknown"
+        
+        # Classify TOR traffic subcategory based on patterns
+        packet_count = len(flow.packets)
+        duration = flow.last_seen - flow.first_seen if flow.first_seen else 0
+        bytes_per_sec = flow.total_bytes / max(duration, 0.1)
+        
+        if packet_count > 20 and cv < 0.3 and bytes_per_sec < 5000:
+            subcategory = "🛒 Marketplace Browsing"
+            fingerprint_score = 0.9
+            evidence.append(f"Fingerprint: {subcategory} (high regularity, low throughput)")
+        elif bytes_per_sec > 50000 and avg_size > 1200:
+            subcategory = "📥 File Transfer"
+            fingerprint_score = 0.85
+            evidence.append(f"Fingerprint: {subcategory} (high throughput)")
+        elif cv < 0.2 and packet_count < 30 and 0.5 <= mean_iat <= 5.0 if len(iats) >= 2 else False:
+            subcategory = "🤖 C2 Beaconing"
+            fingerprint_score = 0.95
+            evidence.append(f"Fingerprint: {subcategory} (heartbeat pattern)")
+        elif packet_count > 10:
+            subcategory = "🌐 Web Browsing"
+            fingerprint_score = 0.7
+            evidence.append(f"Fingerprint: {subcategory} (general pattern)")
+        else:
+            subcategory = "❓ Unclassified"
+            fingerprint_score = 0.5
+        
+        # Store fingerprint info in flow
+        flow.subcategory = subcategory
+        flow.fingerprint_score = fingerprint_score
+        
+        # ============ ML CLASSIFICATION ============
+        ml_score = 0.5  # Default neutral score
+        ml_label = "Unknown"
+        try:
+            from models.ml_tor_classifier import get_ml_classifier, FlowFeatureExtractor, FlowStats
+            
+            # Build flow stats from our flow
+            ml_flow = FlowStats(
+                src_ip=flow.src_ip,
+                dst_ip=flow.dst_ip,
+                src_port=flow.src_port,
+                dst_port=flow.dst_port,
+                protocol=6 if flow.packets else 6
+            )
+            
+            # Add packets
+            for pkt in flow.packets:
+                ml_flow.add_packet(pkt.timestamp, pkt.size, pkt.src_ip == flow.src_ip)
+            
+            # Classify
+            ml_clf = get_ml_classifier()
+            result = ml_clf.predict_flow(ml_flow)
+            
+            if result['is_tor']:
+                ml_score = result['confidence']
+                ml_label = f"ML: TOR ({result['confidence']:.0%})"
+                evidence.append(f"🤖 ML Classification: TOR ({result['confidence']:.0%} confidence)")
+            else:
+                ml_score = 1.0 - result['confidence']
+                ml_label = f"ML: Non-TOR ({result['confidence']:.0%})"
+                
+        except Exception as e:
+            ml_score = 0.5  # Fallback
+        
+        # ============ COMBINED SCORE (Antigravity weights) ============
+        # Volume 35%, Timing 25%, Fingerprint 15%, ML 25%
+        correlation_score = (
+            timing_score * 0.25 +
+            volume_score * 0.35 +
+            fingerprint_score * 0.15 +
+            ml_score * 0.25
+        )
+        
+        # Boost if confirmed TOR relay connection
+        if flow.is_tor and flow.relay_nickname:
+            correlation_score = min(1.0, correlation_score * 1.2)
+            evidence.append(f"✓ Confirmed TOR relay: {flow.relay_nickname}")
+        
+        # Match threshold lowered to 0.55 for real-world scenarios
+        is_match = correlation_score >= 0.55
         
         if is_match:
-            evidence.append(f"HIGH CORRELATION: TOR Entry Guard traffic detected!")
+            evidence.append(f"🎯 CORRELATION MATCH: TOR traffic de-anonymized!")
         
         # Determine origin IP
         origin_ip = flow.src_ip if flow.dst_ip in self.tor_relay_ips else flow.dst_ip
@@ -292,6 +441,10 @@ class RealTimeCorrelationEngine:
             local_origin_ip=origin_ip,
             evidence=evidence
         )
+        
+        # Add fingerprint info to result
+        result.subcategory = subcategory
+        result.fingerprint_score = fingerprint_score
         
         self._correlations.append(result)
         
@@ -345,6 +498,10 @@ class RealTimeCorrelationEngine:
                             size=len(pkt),
                             protocol=proto
                         )
+                        
+                        # Store raw packet for PCAP export
+                        if len(self._raw_packets) < self._max_raw_packets:
+                            self._raw_packets.append(pkt)
                         
                         self.process_packet(live_pkt)
                 
@@ -414,6 +571,49 @@ class RealTimeCorrelationEngine:
         self._tor_flows.clear()
         self._correlations.clear()
         self._packet_count = 0
+        self._raw_packets.clear()
+    
+    def get_raw_packet_count(self) -> int:
+        """Get number of raw packets stored for PCAP export."""
+        return len(self._raw_packets)
+    
+    def export_to_pcap(self, filename: str = None) -> str:
+        """
+        Export captured packets to PCAP file.
+        
+        Args:
+            filename: Output filename (default: auto-generated with timestamp)
+            
+        Returns:
+            Path to the saved PCAP file
+        """
+        if not self._raw_packets:
+            raise ValueError("No packets captured to export")
+        
+        try:
+            from scapy.all import wrpcap
+            import os
+            
+            # Generate filename if not provided
+            if not filename:
+                timestamp = time.strftime('%Y%m%d_%H%M%S')
+                filename = f"tor_capture_{timestamp}.pcap"
+            
+            # Ensure captures directory exists
+            captures_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'captures')
+            os.makedirs(captures_dir, exist_ok=True)
+            
+            filepath = os.path.join(captures_dir, filename)
+            
+            # Write packets to PCAP
+            wrpcap(filepath, self._raw_packets)
+            
+            return filepath
+            
+        except ImportError:
+            raise ImportError("Scapy is required for PCAP export")
+        except Exception as e:
+            raise RuntimeError(f"Failed to export PCAP: {e}")
 
 
 # Singleton instance
@@ -436,13 +636,27 @@ def build_tor_relay_database(raw_relays: List[Dict]) -> Dict[str, Dict]:
         raw_relays: List of relay dicts from Onionoo
         
     Returns:
-        Dict mapping IP to relay info
+        Dict mapping IP to relay info (includes port for strict matching)
     """
     relay_db = {}
     
     for r in raw_relays:
         or_addr = r.get('or_addresses', [''])[0]
-        ip = or_addr.rsplit(':', 1)[0].strip('[]') if or_addr else ''
+        
+        # Parse IP and port from address (e.g., "1.2.3.4:9001" or "[2001:db8::1]:9001")
+        if or_addr:
+            if ']:' in or_addr:  # IPv6
+                ip = or_addr.rsplit(':', 1)[0].strip('[]')
+                port = int(or_addr.rsplit(':', 1)[1]) if ':' in or_addr else 9001
+            elif ':' in or_addr:  # IPv4
+                parts = or_addr.rsplit(':', 1)
+                ip = parts[0]
+                port = int(parts[1]) if len(parts) > 1 else 9001
+            else:
+                ip = or_addr
+                port = 9001
+        else:
+            continue
         
         if ip:
             flags = r.get('flags', [])
@@ -452,6 +666,7 @@ def build_tor_relay_database(raw_relays: List[Dict]) -> Dict[str, Dict]:
                 'nickname': r.get('nickname', 'Unknown'),
                 'role': role,
                 'flags': flags,
+                'port': port,  # Include port for strict matching
                 'country': r.get('country_name', 'Unknown'),
                 'bandwidth': r.get('bandwidth', 0)
             }

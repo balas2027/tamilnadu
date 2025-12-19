@@ -218,6 +218,86 @@ st.markdown("""
     .analyzing {
         animation: pulse 2s ease-in-out infinite;
     }
+    
+    /* Circuit Path Visualization (Tor Browser style) */
+    .circuit-container {
+        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+    }
+    
+    .circuit-header {
+        color: #A78BFA;
+        font-size: 0.9rem;
+        font-weight: 600;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #334155;
+        margin-bottom: 1rem;
+    }
+    
+    .circuit-title {
+        color: #94A3B8;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 1rem;
+    }
+    
+    .circuit-path {
+        position: relative;
+        padding-left: 2rem;
+    }
+    
+    .circuit-node {
+        position: relative;
+        padding: 0.5rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .circuit-node::before {
+        content: '';
+        position: absolute;
+        left: -1.5rem;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #334155;
+        border: 2px solid #64748B;
+    }
+    
+    .circuit-node:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        left: -1.25rem;
+        top: 1.5rem;
+        width: 2px;
+        height: calc(100% - 0.5rem);
+        background: linear-gradient(180deg, #64748B, #334155);
+    }
+    
+    .circuit-node.browser::before { border-color: #10B981; background: #10B98133; }
+    .circuit-node.guard::before { border-color: #F59E0B; background: #F59E0B33; }
+    .circuit-node.middle::before { border-color: #3B82F6; background: #3B82F633; }
+    .circuit-node.exit::before { border-color: #EF4444; background: #EF444433; }
+    .circuit-node.destination::before { border-color: #A78BFA; background: #A78BFA33; }
+    
+    .node-flag { font-size: 1.2rem; }
+    .node-role { color: #94A3B8; font-size: 0.7rem; text-transform: uppercase; }
+    .node-name { color: #F1F5F9; font-weight: 500; }
+    .node-ip { color: #64748B; font-size: 0.8rem; font-family: monospace; }
+    
+    /* Network Topology Graph Container */
+    .topology-container {
+        background: #0F172A;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -247,6 +327,226 @@ def create_status_badge(status: str) -> str:
     }
     badge_class = status_map.get(status, 'normal')
     return f'<span class="status-badge {badge_class}">{status}</span>'
+
+
+# Country code to flag emoji mapping
+COUNTRY_FLAGS = {
+    'DE': '🇩🇪', 'US': '🇺🇸', 'FR': '🇫🇷', 'NL': '🇳🇱', 'GB': '🇬🇧', 'CH': '🇨🇭',
+    'SE': '🇸🇪', 'FI': '🇫🇮', 'NO': '🇳🇴', 'CA': '🇨🇦', 'AU': '🇦🇺', 'JP': '🇯🇵',
+    'RO': '🇷🇴', 'RU': '🇷🇺', 'SG': '🇸🇬', 'BG': '🇧🇬', 'CZ': '🇨🇿', 'AT': '🇦🇹',
+    'PL': '🇵🇱', 'HU': '🇭🇺', 'ES': '🇪🇸', 'IT': '🇮🇹', 'BE': '🇧🇪', 'LU': '🇱🇺',
+    'DK': '🇩🇰', 'IE': '🇮🇪', 'IS': '🇮🇸', 'LV': '🇱🇻', 'LT': '🇱🇹', 'SK': '🇸🇰',
+    'UA': '🇺🇦', 'MD': '🇲🇩', 'HK': '🇭🇰', 'TW': '🇹🇼', 'KR': '🇰🇷', 'BR': '🇧🇷',
+}
+
+
+def get_country_flag(country_code: str) -> str:
+    """Get flag emoji for country code."""
+    if not country_code:
+        return '🌍'
+    code = country_code.upper()[:2]
+    return COUNTRY_FLAGS.get(code, '🌍')
+
+
+def render_circuit_visual(circuit, destination: str = None) -> str:
+    """
+    Render a visual circuit path like Tor Browser's circuit popup.
+    
+    Args:
+        circuit: TorCircuit object with path
+        destination: Optional destination (URL or .onion)
+        
+    Returns:
+        HTML string for rendering
+    """
+    entry = circuit.entry_guard
+    middle = circuit.middle_relay
+    exit_node = circuit.exit_node
+    
+    # Build destination display
+    dest_display = destination or "Destination"
+    if destination and len(destination) > 30:
+        dest_display = destination[:15] + "..." + destination[-12:]
+    
+    # Determine if .onion site
+    is_onion = destination and '.onion' in destination.lower() if destination else False
+    
+    html = f'''
+    <div class="circuit-container">
+        <div class="circuit-header">Circuit for {dest_display}</div>
+        <div class="circuit-title">Tor Circuit</div>
+        <div class="circuit-path">
+            <div class="circuit-node browser">
+                <span class="node-name">This browser</span>
+            </div>
+    '''
+    
+    # Entry Guard
+    if entry:
+        flag = get_country_flag(entry.country if hasattr(entry, 'country') else '')
+        html += f'''
+            <div class="circuit-node guard">
+                <span class="node-flag">{flag}</span>
+                <div>
+                    <span class="node-name">{entry.nickname}</span>
+                    <span class="node-role">(guard)</span><br>
+                    <span class="node-ip">{entry.ip_address}</span>
+                </div>
+            </div>
+        '''
+    
+    # Middle Relay
+    if middle:
+        flag = get_country_flag(middle.country if hasattr(middle, 'country') else '')
+        html += f'''
+            <div class="circuit-node middle">
+                <span class="node-flag">{flag}</span>
+                <div>
+                    <span class="node-name">{middle.nickname}</span><br>
+                    <span class="node-ip">{middle.ip_address}</span>
+                </div>
+            </div>
+        '''
+    
+    # Exit Node
+    if exit_node:
+        flag = get_country_flag(exit_node.country if hasattr(exit_node, 'country') else '')
+        html += f'''
+            <div class="circuit-node exit">
+                <span class="node-flag">{flag}</span>
+                <div>
+                    <span class="node-name">{exit_node.nickname}</span><br>
+                    <span class="node-ip">{exit_node.ip_address}</span>
+                </div>
+            </div>
+        '''
+    
+    # Onion site relays (for .onion destinations)
+    if is_onion:
+        html += '''
+            <div class="circuit-node middle">
+                <span class="node-name">Onion site relays</span>
+            </div>
+        '''
+    
+    # Destination
+    html += f'''
+            <div class="circuit-node destination">
+                <span class="node-name">{dest_display}</span>
+            </div>
+        </div>
+    </div>
+    '''
+    
+    return html
+
+
+def create_network_topology(circuits: list, correlations: list = None) -> 'go.Figure':
+    """
+    Create a network topology graph showing TOR circuit paths and correlations.
+    
+    Args:
+        circuits: List of TorCircuit objects
+        correlations: Optional list of correlation results
+        
+    Returns:
+        Plotly Figure object
+    """
+    import plotly.graph_objects as go
+    
+    # Build node and edge data
+    nodes = {'Browser': {'type': 'browser', 'x': 0, 'y': 0.5}}
+    edges = []
+    
+    y_offset = 0
+    for i, circ in enumerate(circuits[:5]):  # Limit to 5 circuits
+        y_pos = i * 0.2 + 0.1
+        
+        # Entry Guard
+        entry = circ.entry_guard
+        if entry:
+            entry_key = f"Guard:{entry.nickname}"
+            if entry_key not in nodes:
+                nodes[entry_key] = {'type': 'guard', 'x': 0.25, 'y': y_pos, 'ip': entry.ip_address}
+            edges.append(('Browser', entry_key))
+        
+        # Middle Relay
+        middle = circ.middle_relay
+        if middle:
+            middle_key = f"Middle:{middle.nickname}"
+            if middle_key not in nodes:
+                nodes[middle_key] = {'type': 'middle', 'x': 0.5, 'y': y_pos, 'ip': middle.ip_address}
+            if entry:
+                edges.append((f"Guard:{entry.nickname}", middle_key))
+        
+        # Exit Node
+        exit_n = circ.exit_node
+        if exit_n:
+            exit_key = f"Exit:{exit_n.nickname}"
+            if exit_key not in nodes:
+                nodes[exit_key] = {'type': 'exit', 'x': 0.75, 'y': y_pos, 'ip': exit_n.ip_address}
+            if middle:
+                edges.append((f"Middle:{middle.nickname}", exit_key))
+    
+    # Add destination node
+    nodes['Destination'] = {'type': 'destination', 'x': 1.0, 'y': 0.5}
+    
+    # Connect exits to destination
+    for name, data in nodes.items():
+        if data['type'] == 'exit':
+            edges.append((name, 'Destination'))
+    
+    # Color mapping
+    colors = {'browser': '#10B981', 'guard': '#F59E0B', 'middle': '#3B82F6', 'exit': '#EF4444', 'destination': '#A78BFA'}
+    
+    # Create edge traces
+    edge_x, edge_y = [], []
+    for src, dst in edges:
+        if src in nodes and dst in nodes:
+            edge_x.extend([nodes[src]['x'], nodes[dst]['x'], None])
+            edge_y.extend([nodes[src]['y'], nodes[dst]['y'], None])
+    
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=2, color='#475569'),
+        hoverinfo='none',
+        mode='lines'
+    )
+    
+    # Create node traces
+    node_x = [data['x'] for data in nodes.values()]
+    node_y = [data['y'] for data in nodes.values()]
+    node_colors = [colors[data['type']] for data in nodes.values()]
+    node_text = [f"{name}<br>{data.get('ip', '')}" for name, data in nodes.items()]
+    
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        hoverinfo='text',
+        text=[name.split(':')[-1] if ':' in name else name for name in nodes.keys()],
+        textposition='bottom center',
+        hovertext=node_text,
+        marker=dict(
+            size=20,
+            color=node_colors,
+            line=dict(width=2, color='#1E293B')
+        )
+    )
+    
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        title=dict(text='TOR Circuit Topology', font=dict(color='#F1F5F9')),
+        showlegend=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        height=350,
+        margin=dict(l=20, r=20, t=40, b=20),
+        font=dict(color='#94A3B8')
+    )
+    
+    return fig
 
 
 @st.cache_resource
@@ -495,7 +795,7 @@ def main():
         
         analysis_mode = st.selectbox(
             "Analysis Mode",
-            ["🧪 Synthetic Demo", "📂 Upload PCAP", "📡 Live Capture", "🌍 Global Network Monitor"],
+            ["🧪 Synthetic Demo", "📊 Traffic Analyzer", "📂 Upload PCAP", "📡 Live Capture", "🌍 Global Network Monitor", "🌐 Network-Wide Vantage Point"],
             help="Choose data source for analysis"
         )
         
@@ -590,6 +890,231 @@ def main():
                 # Store in session state
                 st.session_state['results'] = results
                 st.session_state['packets'] = packets
+    
+    elif "📊" in analysis_mode:
+        # ===== TRAFFIC ANALYZER MODE =====
+        # Uses simple TOR detection from documentation
+        st.markdown('<div class="section-header">📊 Traffic Analyzer (Simple Detection)</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="info-box">
+            <strong>Simple TOR Detection</strong> using documented methods:
+            <ul>
+                <li>✓ <strong>IP Prefix Matching</strong> - Known TOR relay prefixes</li>
+                <li>✓ <strong>Port Analysis</strong> - TOR ports (9001, 9050, 9150)</li>
+                <li>✓ <strong>Cell Size</strong> - TOR cells (~512 bytes)</li>
+                <li>✓ <strong>IAT Pattern</strong> - Low variance timing</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Analysis source selection
+        ta_source = st.radio("Data Source", ["📡 Live Capture", "📂 Upload PCAP"], horizontal=True)
+        
+        if ta_source == "📡 Live Capture":
+            # Live Capture Settings
+            st.markdown("### 📡 Live Capture Settings")
+            
+            if not is_scapy_available():
+                st.error("⚠️ Scapy not installed. Run: `pip install scapy`")
+            else:
+                interfaces = StreamIngester.get_available_interfaces()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    ta_interface = st.selectbox("Interface", ["Default"] + (interfaces if interfaces else []))
+                with col2:
+                    ta_duration = st.slider("Duration (sec)", 10, 120, 30)
+                
+                if st.button("🔴 Start Capture & Analyze", use_container_width=True):
+                    try:
+                        from analysis.tor_detector import TORTrafficDetector
+                        
+                        detector = TORTrafficDetector()
+                        
+                        with st.spinner(f"Capturing for {ta_duration} seconds..."):
+                            progress = st.progress(0, "Starting capture...")
+                            
+                            from scapy.all import sniff
+                            
+                            captured_packets = []
+                            
+                            def packet_callback(pkt):
+                                if pkt.haslayer('IP'):
+                                    ip = pkt['IP']
+                                    src_port = dst_port = 0
+                                    proto = "OTHER"
+                                    
+                                    if pkt.haslayer('TCP'):
+                                        src_port = pkt['TCP'].sport
+                                        dst_port = pkt['TCP'].dport
+                                        proto = "TCP"
+                                    elif pkt.haslayer('UDP'):
+                                        src_port = pkt['UDP'].sport
+                                        dst_port = pkt['UDP'].dport
+                                        proto = "UDP"
+                                    
+                                    detector.process_packet(
+                                        src_ip=ip.src,
+                                        dst_ip=ip.dst,
+                                        src_port=src_port,
+                                        dst_port=dst_port,
+                                        size=len(pkt),
+                                        protocol=proto
+                                    )
+                                    captured_packets.append(pkt)
+                            
+                            iface = None if ta_interface == "Default" else ta_interface
+                            sniff(iface=iface, prn=packet_callback, timeout=ta_duration, filter="tcp or udp", store=False)
+                            
+                            progress.progress(0.7, "Analyzing flows...")
+                            
+                            # Analyze
+                            results = detector.analyze_all_flows()
+                            summary = detector.get_summary()
+                            
+                            progress.progress(1.0, "Complete!")
+                            
+                            # Store results
+                            st.session_state['ta_results'] = results
+                            st.session_state['ta_summary'] = summary
+                            st.session_state['ta_detector'] = detector
+                            
+                    except ImportError as e:
+                        st.error(f"Import error: {e}")
+                    except Exception as e:
+                        st.error(f"Capture error: {e}")
+        
+        else:  # PCAP Upload
+            st.markdown("### 📂 Upload PCAP")
+            
+            ta_file = st.file_uploader("Upload PCAP file", type=['pcap', 'pcapng'])
+            
+            if ta_file is not None:
+                if st.button("🔍 Analyze PCAP", use_container_width=True):
+                    try:
+                        from analysis.tor_detector import analyze_pcap
+                        import tempfile
+                        
+                        with st.spinner("Processing PCAP..."):
+                            progress = st.progress(0, "Reading file...")
+                            
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+                                tmp.write(ta_file.getvalue())
+                                tmp_path = tmp.name
+                            
+                            progress.progress(0.3, "Analyzing packets...")
+                            
+                            detector, results = analyze_pcap(tmp_path)
+                            summary = detector.get_summary()
+                            
+                            progress.progress(1.0, "Complete!")
+                            
+                            st.session_state['ta_results'] = results
+                            st.session_state['ta_summary'] = summary
+                            st.session_state['ta_detector'] = detector
+                            
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+        
+        # ===== Display Results =====
+        if 'ta_summary' in st.session_state:
+            summary = st.session_state['ta_summary']
+            results = st.session_state.get('ta_results', [])
+            
+            st.markdown("---")
+            st.markdown("### 📊 Analysis Summary")
+            
+            # Metrics row
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(create_metric_card("Total Packets", f"{summary['total_packets']:,}", "primary"), unsafe_allow_html=True)
+            with col2:
+                st.markdown(create_metric_card("Total Flows", str(summary['total_flows']), "info"), unsafe_allow_html=True)
+            with col3:
+                tor_count = summary.get('tor_flows', 0)
+                tor_color = "danger" if tor_count > 0 else "success"
+                st.markdown(create_metric_card("TOR Flows", str(tor_count), tor_color), unsafe_allow_html=True)
+            with col4:
+                st.markdown(create_metric_card("Non-TOR Flows", str(summary.get('non_tor_flows', 0)), "success"), unsafe_allow_html=True)
+            
+            # TOR percentage
+            tor_pct = summary.get('tor_percentage', 0)
+            if tor_pct > 0:
+                st.error(f"⚠️ **{tor_pct:.1f}%** of traffic is TOR")
+            else:
+                st.success("✅ No TOR traffic detected")
+            
+            # Traffic Type Distribution
+            by_type = summary.get('by_type', {})
+            if by_type:
+                st.markdown("### 📈 Traffic Type Distribution")
+                
+                import plotly.graph_objects as go
+                
+                colors = {
+                    'Non-TOR': '#10B981',
+                    'TOR Entry Guard': '#EF4444',
+                    'TOR Bridge': '#F59E0B',
+                    'TOR Relay': '#7C3AED',
+                    'VPN': '#3B82F6'
+                }
+                
+                fig = go.Figure(data=[go.Pie(
+                    labels=list(by_type.keys()),
+                    values=list(by_type.values()),
+                    hole=0.4,
+                    marker_colors=[colors.get(k, '#94A3B8') for k in by_type.keys()]
+                )])
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#94A3B8',
+                    height=300
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # TOR Flows Detail
+            tor_results = [r for r in results if r.traffic_type.value != "Non-TOR"]
+            if tor_results:
+                st.markdown("### 🔴 Detected TOR Traffic")
+                
+                tor_data = []
+                for r in tor_results:
+                    tor_data.append({
+                        'Type': r.traffic_type.value,
+                        'Confidence': f"{r.confidence:.0%}",
+                        'Src IP': r.src_ip,
+                        'Dst IP': r.dst_ip,
+                        'Dst Port': r.dst_port,
+                        'Packets': r.packet_count,
+                        'Bytes': r.total_bytes,
+                        'Indicators': " | ".join(r.indicators[:2])
+                    })
+                
+                import pandas as pd
+                st.dataframe(pd.DataFrame(tor_data), use_container_width=True)
+                
+                # Show indicators for first TOR flow
+                if tor_results:
+                    with st.expander("🔍 Detection Indicators (First Flow)"):
+                        for ind in tor_results[0].indicators:
+                            st.markdown(f"• {ind}")
+            
+            # All flows table
+            with st.expander("📋 All Flows"):
+                all_data = []
+                for r in results:
+                    all_data.append({
+                        'Type': r.traffic_type.value,
+                        'Confidence': f"{r.confidence:.0%}",
+                        'Src': f"{r.src_ip}:{r.src_port}",
+                        'Dst': f"{r.dst_ip}:{r.dst_port}",
+                        'Packets': r.packet_count,
+                        'Duration': f"{r.duration:.1f}s"
+                    })
+                
+                import pandas as pd
+                st.dataframe(pd.DataFrame(all_data), use_container_width=True, height=300)
     
     elif "📂" in analysis_mode:
         # PCAP upload mode
@@ -902,6 +1427,37 @@ def main():
                                 
                                 st.dataframe(pd.DataFrame(circuit_data), use_container_width=True)
                                 
+                                # Visual Circuit Display (Tor Browser style)
+                                st.markdown("---")
+                                st.markdown("##### 🌐 Visual Circuit Path")
+                                
+                                # Select circuit to visualize
+                                vis_options = [f"Circuit {c.circuit_id} ({c.purpose})" for c in circuits]
+                                selected_vis_idx = st.selectbox("Select Circuit to Visualize", 
+                                                                range(len(vis_options)),
+                                                                format_func=lambda x: vis_options[x],
+                                                                key="circuit_vis_select")
+                                
+                                selected_vis_circuit = circuits[selected_vis_idx]
+                                
+                                # Get destination from streams if available
+                                destination = None
+                                for stream in streams:
+                                    if stream.circuit_id == selected_vis_circuit.circuit_id:
+                                        destination = stream.target
+                                        break
+                                
+                                # Render visual circuit
+                                circuit_html = render_circuit_visual(selected_vis_circuit, destination)
+                                st.markdown(circuit_html, unsafe_allow_html=True)
+                                
+                                # Network Topology Graph
+                                st.markdown("---")
+                                st.markdown("##### 🗺️ Network Topology")
+                                
+                                topology_fig = create_network_topology(circuits)
+                                st.plotly_chart(topology_fig, use_container_width=True)
+                                
                                 # FORENSIC ORIGIN TRACING
                                 st.markdown("---")
                                 st.markdown("##### 🔬 Forensic Origin Tracing")
@@ -1057,7 +1613,6 @@ def main():
                             build_tor_relay_database,
                             RealTimeCorrelationEngine
                         )
-                        from core.stream_ingester import StreamIngester
                         
                         # Get engine and set TOR relays
                         rt_engine = get_realtime_engine()
@@ -1067,6 +1622,10 @@ def main():
                         if raw_relays:
                             relay_db = build_tor_relay_database(raw_relays)
                             rt_engine.set_tor_relays(relay_db)
+                            
+                            # Also load into EntryGuardAnalyzer for classification
+                            EntryGuardAnalyzer.load_live_relays(list(relay_db.keys()))
+                            
                             st.info(f"📡 Loaded {len(relay_db):,} TOR relay IPs for correlation")
                         
                         # Capture controls
@@ -1169,13 +1728,182 @@ def main():
                             corr_df = pd.DataFrame(correlations)
                             st.dataframe(corr_df[['time_formatted', 'correlation_score', 'timing_score', 'volume_score', 'is_match', 'origin_ip']], 
                                         use_container_width=True, height=200)
+                            
+                            # Correlation Flow Visualization
+                            st.markdown("---")
+                            st.markdown("#### 🗺️ Correlation Network Topology")
+                            
+                            # Create correlation network graph
+                            import plotly.graph_objects as go
+                            
+                            nodes = {'Origin': {'x': 0, 'y': 0.5, 'color': '#10B981'}}
+                            edges = []
+                            
+                            # Add unique entry guards from correlations
+                            unique_guards = set()
+                            for i, corr in enumerate(correlations[:10]):
+                                guard = corr.get('entry_guard', 'Unknown')
+                                if guard not in unique_guards:
+                                    y_pos = (len(unique_guards) * 0.15) + 0.2
+                                    nodes[guard] = {
+                                        'x': 0.5, 
+                                        'y': y_pos, 
+                                        'color': '#F59E0B' if corr.get('is_match') else '#64748B',
+                                        'score': corr.get('correlation_score', 0)
+                                    }
+                                    unique_guards.add(guard)
+                                edges.append(('Origin', guard, corr.get('correlation_score', 0)))
+                            
+                            # Add destination
+                            nodes['TOR Network'] = {'x': 1.0, 'y': 0.5, 'color': '#A78BFA'}
+                            for guard in unique_guards:
+                                edges.append((guard, 'TOR Network', 0.5))
+                            
+                            # Build traces
+                            edge_x, edge_y = [], []
+                            for src, dst, _ in edges:
+                                if src in nodes and dst in nodes:
+                                    edge_x.extend([nodes[src]['x'], nodes[dst]['x'], None])
+                                    edge_y.extend([nodes[src]['y'], nodes[dst]['y'], None])
+                            
+                            import plotly.graph_objects as go
+                            edge_trace = go.Scatter(
+                                x=edge_x, y=edge_y,
+                                line=dict(width=2, color='#475569'),
+                                hoverinfo='none', mode='lines'
+                            )
+                            
+                            node_x = [d['x'] for d in nodes.values()]
+                            node_y = [d['y'] for d in nodes.values()]
+                            node_colors = [d['color'] for d in nodes.values()]
+                            node_labels = list(nodes.keys())
+                            
+                            node_trace = go.Scatter(
+                                x=node_x, y=node_y,
+                                mode='markers+text',
+                                text=[n.split('(')[0].strip()[:15] for n in node_labels],
+                                textposition='bottom center',
+                                hovertext=[f"{n}<br>Score: {nodes[n].get('score', '-')}" for n in node_labels],
+                                hoverinfo='text',
+                                marker=dict(size=25, color=node_colors, line=dict(width=2, color='#1E293B'))
+                            )
+                            
+                            corr_fig = go.Figure(data=[edge_trace, node_trace])
+                            corr_fig.update_layout(
+                                title=dict(text='Correlation Attack Flow', font=dict(color='#F1F5F9')),
+                                showlegend=False,
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                height=300,
+                                margin=dict(l=20, r=20, t=40, b=20),
+                                font=dict(color='#94A3B8')
+                            )
+                            st.plotly_chart(corr_fig, use_container_width=True)
+                            
+                            # ============ TOR FINGERPRINTING SECTION ============
+                            st.markdown("---")
+                            st.markdown("#### 🔬 TOR Traffic Fingerprinting")
+                            
+                            # Collect subcategory data from correlations
+                            subcategory_counts = {}
+                            for corr in correlations:
+                                subcat = corr.get('subcategory', 'Unknown')
+                                subcategory_counts[subcat] = subcategory_counts.get(subcat, 0) + 1
+                            
+                            if subcategory_counts:
+                                import plotly.express as px
+                                
+                                col1, col2 = st.columns([1, 1])
+                                
+                                with col1:
+                                    # Subcategory distribution pie chart
+                                    
+                                    df_subcat = pd.DataFrame([
+                                        {'Subcategory': k, 'Count': v} 
+                                        for k, v in subcategory_counts.items()
+                                    ])
+                                    
+                                    fp_fig = px.pie(
+                                        df_subcat, 
+                                        values='Count', 
+                                        names='Subcategory',
+                                        title='TOR Traffic Subcategories',
+                                        color_discrete_sequence=['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#A78BFA']
+                                    )
+                                    fp_fig.update_layout(
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        font=dict(color='#F1F5F9'),
+                                        height=300,
+                                        margin=dict(t=40, b=20, l=20, r=20)
+                                    )
+                                    st.plotly_chart(fp_fig, use_container_width=True)
+                                
+                                with col2:
+                                    # Fingerprint scores bar chart
+                                    fp_scores = []
+                                    for corr in correlations[-10:]:  # Last 10
+                                        fp_scores.append({
+                                            'Time': corr.get('time_formatted', ''),
+                                            'Score': corr.get('fingerprint_score', 0) * 100,
+                                            'Category': corr.get('subcategory', 'Unknown')
+                                        })
+                                    
+                                    if fp_scores:
+                                        df_fps = pd.DataFrame(fp_scores)
+                                        bar_fig = px.bar(
+                                            df_fps,
+                                            x='Time',
+                                            y='Score',
+                                            color='Category',
+                                            title='Fingerprint Confidence (Last 10)',
+                                            color_discrete_sequence=['#10B981', '#F59E0B', '#EF4444', '#3B82F6']
+                                        )
+                                        bar_fig.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            font=dict(color='#F1F5F9'),
+                                            height=300,
+                                            margin=dict(t=40, b=20, l=20, r=20),
+                                            yaxis_title='Confidence %'
+                                        )
+                                        st.plotly_chart(bar_fig, use_container_width=True)
+                            else:
+                                st.info("Fingerprint data will appear after correlations are detected.")
                         
-                        # Clear button
-                        if st.button("🗑️ Clear Results"):
-                            rt_engine.clear()
-                            if 'attack_results' in st.session_state:
-                                del st.session_state['attack_results']
-                            st.rerun()
+                        # Action buttons
+                        st.markdown("---")
+                        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
+                        
+                        with btn_col1:
+                            if st.button("🗑️ Clear Results"):
+                                rt_engine.clear()
+                                if 'attack_results' in st.session_state:
+                                    del st.session_state['attack_results']
+                                st.rerun()
+                        
+                        with btn_col2:
+                            raw_count = rt_engine.get_raw_packet_count()
+                            if st.button(f"💾 Export PCAP ({raw_count} pkts)"):
+                                if raw_count > 0:
+                                    try:
+                                        pcap_path = rt_engine.export_to_pcap()
+                                        st.success(f"✅ PCAP saved: {pcap_path}")
+                                        
+                                        # Offer download
+                                        with open(pcap_path, 'rb') as f:
+                                            st.download_button(
+                                                label="📥 Download PCAP",
+                                                data=f.read(),
+                                                file_name=pcap_path.split('/')[-1].split('\\')[-1],
+                                                mime="application/vnd.tcpdump.pcap"
+                                            )
+                                    except Exception as e:
+                                        st.error(f"Export failed: {e}")
+                                else:
+                                    st.warning("No packets captured yet. Start a capture first.")
                         
                     except ImportError as e:
                         st.warning(f"Real-time correlation not available: {e}")
@@ -1277,6 +2005,7 @@ def main():
                     if stats.country_distribution:
                         top_countries = dict(sorted(stats.country_distribution.items(), key=lambda x: -x[1])[:15])
                         
+                        import plotly.express as px
                         fig = px.bar(
                             x=list(top_countries.keys()),
                             y=list(top_countries.values()),
@@ -1389,6 +2118,262 @@ def main():
         except Exception as e:
             st.error(f"Error: {e}")
     
+    elif "🌐" in analysis_mode:
+        # ===== NETWORK-WIDE VANTAGE POINT MODE =====
+        st.markdown('<div class="section-header">🌐 Network-Wide Vantage Point</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="info-box">
+            <strong>Passive Network-Wide TOR Detection</strong> - Monitor all network traffic to detect 
+            internal IPs using TOR without accessing their Control Port.
+            <br><br>
+            <strong>Detection Methods:</strong>
+            <ul>
+                <li>✓ <strong>Identity Score (w=0.45)</strong> - Known TOR Relay IP matching</li>
+                <li>✓ <strong>Fingerprint Score (w=0.35)</strong> - TOR Cell size analysis (~512 bytes)</li>
+                <li>✓ <strong>Pattern Score (w=0.20)</strong> - Burst timing analysis</li>
+                <li>✓ <strong>Random Forest ML</strong> - 21 UNB-CIC features classification</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        try:
+            # Import the network-level stream fetcher module
+            import sys
+            from pathlib import Path
+            
+            # Get the absolute path to the tamilnadu directory (parent of tor_classifier)
+            current_file = Path(__file__).resolve()
+            tamilnadu_path = current_file.parent.parent
+            tamilnadu_path_str = str(tamilnadu_path)
+            
+            # Ensure the path is in sys.path (only add once)
+            if tamilnadu_path_str not in sys.path:
+                sys.path.insert(0, tamilnadu_path_str)
+            
+            from tor_network_level_active_stream_fetcher_with_ip_address.network_monitor import (
+                NetworkWideMonitor, get_network_monitor, TORUserActivity
+            )
+            from tor_network_level_active_stream_fetcher_with_ip_address.relay_database import get_relay_database
+            from tor_network_level_active_stream_fetcher_with_ip_address.global_listener import GlobalListener
+            
+            # Initialize session state for network monitor
+            if 'nw_monitor' not in st.session_state:
+                st.session_state['nw_monitor'] = None
+            if 'nw_running' not in st.session_state:
+                st.session_state['nw_running'] = False
+            if 'nw_detected_users' not in st.session_state:
+                st.session_state['nw_detected_users'] = []
+            
+            # Controls
+            st.markdown("### 🎛️ Network Monitor Controls")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Interface selection
+                interfaces = GlobalListener.get_available_interfaces()
+                nw_interface = st.selectbox("Interface", ["Default"] + (interfaces if interfaces else []))
+            
+            with col2:
+                ccs_threshold = st.slider("CCS Threshold", 0.5, 0.95, 0.75, 0.05,
+                                         help="Minimum Composite Confidence Score to classify as TOR")
+            
+            with col3:
+                nw_duration = st.slider("Duration (sec)", 30, 300, 60)
+            
+            # Start/Stop buttons
+            col1, col2, col3 = st.columns([1, 1, 1])
+            
+            with col1:
+                start_disabled = st.session_state.get('nw_running', False)
+                if st.button("🔴 Start Monitoring", use_container_width=True, disabled=start_disabled):
+                    try:
+                        iface = None if nw_interface == "Default" else nw_interface
+                        monitor = NetworkWideMonitor(interface=iface, ccs_threshold=ccs_threshold)
+                        monitor.start(duration=nw_duration)
+                        
+                        st.session_state['nw_monitor'] = monitor
+                        st.session_state['nw_running'] = True
+                        st.success("🔴 Network monitoring started!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to start: {e}")
+            
+            with col2:
+                stop_disabled = not st.session_state.get('nw_running', False)
+                if st.button("⏹️ Stop & Analyze", use_container_width=True, disabled=stop_disabled):
+                    monitor = st.session_state.get('nw_monitor')
+                    if monitor:
+                        monitor.stop()
+                        st.session_state['nw_running'] = False
+                        st.session_state['nw_detected_users'] = monitor.get_detected_users()
+                        st.success("Monitoring stopped. Analyzing results...")
+                        st.rerun()
+            
+            with col3:
+                if st.button("🔄 Refresh", use_container_width=True):
+                    st.rerun()
+            
+            # Show status if running
+            monitor = st.session_state.get('nw_monitor')
+            if monitor and st.session_state.get('nw_running', False):
+                stats = monitor.get_stats()
+                
+                st.markdown("---")
+                st.markdown("### 📊 Live Monitoring Status")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.markdown(create_metric_card("Packets", f"{stats.get('packets_processed', 0):,}", "primary"), unsafe_allow_html=True)
+                with col2:
+                    st.markdown(create_metric_card("Flows Analyzed", str(stats.get('flows_analyzed', 0)), "info"), unsafe_allow_html=True)
+                with col3:
+                    # Use total_tor_flows for TOR traffic flows
+                    tor_flows = stats.get('total_tor_flows', stats.get('tor_flows_detected', 0))
+                    tor_color = "danger" if tor_flows > 0 else "success"
+                    st.markdown(create_metric_card("TOR Flows", str(tor_flows), tor_color), unsafe_allow_html=True)
+                with col4:
+                    # Use unique_tor_users for unique internal IPs using TOR
+                    unique_users = stats.get('unique_tor_users', stats.get('internal_ips_detected', 0))
+                    ip_color = "danger" if unique_users > 0 else "success"
+                    st.markdown(create_metric_card("TOR Users (Unique IPs)", str(unique_users), ip_color), unsafe_allow_html=True)
+                
+                # Live detected users
+                detected = monitor.get_detected_users()
+                if detected:
+                    st.markdown("### 🚨 Detected TOR Users (Live)")
+                    
+                    user_data = []
+                    for user in detected:
+                        confidence_pct = user.highest_ccs_score * 100
+                        user_data.append({
+                            'Internal IP': user.internal_ip,
+                            'Entry Guard': user.entry_guards[0] if user.entry_guards else 'Unknown',
+                            'Confidence': f"{confidence_pct:.1f}%",
+                            'Flows': user.total_flows,
+                            'Packets': user.total_packets,
+                            'Relay Names': ', '.join(user.relay_names[:2]) if user.relay_names else '-'
+                        })
+                    
+                    import pandas as pd
+                    st.dataframe(pd.DataFrame(user_data), use_container_width=True)
+                
+                # Auto-refresh
+                time.sleep(2)
+                st.rerun()
+            
+            # Show results after monitoring stopped
+            detected_users = st.session_state.get('nw_detected_users', [])
+            if detected_users and not st.session_state.get('nw_running', False):
+                st.markdown("---")
+                st.markdown("### 📋 Analysis Results")
+                
+                # Summary metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown(create_metric_card("TOR Users Detected", str(len(detected_users)), "danger"), unsafe_allow_html=True)
+                with col2:
+                    total_flows = sum(u.total_flows for u in detected_users)
+                    st.markdown(create_metric_card("Total TOR Flows", str(total_flows), "warning"), unsafe_allow_html=True)
+                with col3:
+                    avg_conf = sum(u.highest_ccs_score for u in detected_users) / len(detected_users) if detected_users else 0
+                    st.markdown(create_metric_card("Avg Confidence", f"{avg_conf:.1%}", "info"), unsafe_allow_html=True)
+                
+                # Detected users table
+                st.markdown("### 🎯 Detected TOR Users")
+                
+                user_data = []
+                for user in sorted(detected_users, key=lambda u: u.highest_ccs_score, reverse=True):
+                    conf_pct = user.highest_ccs_score * 100
+                    user_data.append({
+                        'Internal IP': user.internal_ip,
+                        'Entry Guard(s)': ', '.join(user.entry_guards[:3]),
+                        'Confidence': f"{conf_pct:.1f}%",
+                        'Flows': user.total_flows,
+                        'Packets': user.total_packets,
+                        'Bytes': f"{user.total_bytes:,}",
+                        'Duration': f"{user.last_seen - user.first_seen:.1f}s",
+                        'Relay Names': ', '.join(user.relay_names[:2]) if user.relay_names else '-'
+                    })
+                
+                import pandas as pd
+                st.dataframe(pd.DataFrame(user_data), use_container_width=True)
+                
+                # Forensic Reports
+                st.markdown("### 📋 Forensic Reports")
+                
+                for user in detected_users[:5]:  # Top 5
+                    with st.expander(f"🔍 Report for {user.internal_ip} (Confidence: {user.highest_ccs_score:.1%})"):
+                        report = f"""
+**Detected TOR Flow from {user.internal_ip} to Entry Guard {user.entry_guards[0] if user.entry_guards else 'Unknown'}.**  
+**Correlation Confidence: {user.highest_ccs_score:.1%}**
+
+---
+
+**Traffic Statistics:**
+- Total Flows: {user.total_flows}
+- Total Packets: {user.total_packets:,}
+- Total Bytes: {user.total_bytes:,}
+- First Seen: {time.strftime('%H:%M:%S', time.localtime(user.first_seen))}
+- Last Seen: {time.strftime('%H:%M:%S', time.localtime(user.last_seen))}
+
+**Entry Guards Contacted:**
+"""
+                        for eg in user.entry_guards:
+                            report += f"\n- {eg}"
+                        
+                        if user.relay_names:
+                            report += "\n\n**Relay Names:**"
+                            for rn in user.relay_names[:5]:
+                                report += f"\n- {rn}"
+                        
+                        report += "\n\n**Evidence:**"
+                        for ev in user.all_evidence[:10]:
+                            report += f"\n- {ev}"
+                        
+                        st.markdown(report)
+            
+            # Relay Database Status
+            st.markdown("---")
+            st.markdown("### 📡 TOR Relay Database")
+            
+            relay_db = get_relay_database()
+            db_stats = relay_db.get_stats()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Relays", f"{db_stats.get('total_relays', 0):,}")
+            with col2:
+                st.metric("Guards", f"{db_stats.get('guards', 0):,}")
+            with col3:
+                st.metric("Exits", f"{db_stats.get('exits', 0):,}")
+            with col4:
+                if st.button("🔄 Refresh DB"):
+                    relay_db.fetch_relay_list(force=True)
+                    st.success("Relay database refreshed!")
+                    st.rerun()
+            
+            if not db_stats.get('is_loaded', False):
+                if st.button("📥 Load Relay Database", use_container_width=True):
+                    with st.spinner("Fetching from Onionoo API..."):
+                        relay_db.fetch_relay_list()
+                    st.success("Relay database loaded!")
+                    st.rerun()
+        
+        except ImportError as e:
+            st.error(f"""
+            ⚠️ **Network-Wide Vantage Point module not available.**
+            
+            Error: {e}
+            
+            Make sure the `tor_network_level_active_stream_fetcher_with_ip_address` folder exists 
+            in the `tamilnadu` directory and all dependencies are installed.
+            """)
+        except Exception as e:
+            st.error(f"Error: {e}")
+    
     elif "🔍" in analysis_mode:
         # Activity Analyzer
         st.markdown('<div class="section-header">🔍 Activity Analyzer</div>', unsafe_allow_html=True)
@@ -1486,6 +2471,7 @@ def main():
                         for k, v in sorted(activity_result.scores.items(), key=lambda x: -x[1])
                     ])
                     
+                    import plotly.express as px
                     fig = px.bar(
                         score_df, x='Activity', y='Score',
                         color='Score', color_continuous_scale='Viridis'
@@ -1601,6 +2587,7 @@ def main():
         with col_chart:
             st.markdown('<div class="section-header">🎯 Traffic Distribution</div>', unsafe_allow_html=True)
             
+            import plotly.graph_objects as go
             fig = go.Figure(data=[go.Pie(
                 labels=list(type_counts.keys()),
                 values=list(type_counts.values()),
@@ -1646,6 +2633,7 @@ def main():
                     'ML Class': deep.traffic_type
                 })
             
+            import pandas as pd
             df = pd.DataFrame(table_data)
             st.dataframe(df, use_container_width=True, hide_index=True)
         
@@ -1731,6 +2719,7 @@ def main():
             st.markdown("#### Binary Classifier (TOR/Non-TOR)")
             if binary_clf.training_metrics:
                 metrics = binary_clf.training_metrics
+                import plotly.graph_objects as go
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=metrics.get('accuracy', 0) * 100,
@@ -1766,6 +2755,7 @@ def main():
                     precision = [per_class[c]['precision'] for c in classes]
                     recall = [per_class[c]['recall'] for c in classes]
                     
+                    import plotly.graph_objects as go
                     fig = go.Figure(data=[
                         go.Bar(name='Precision', x=classes, y=precision, marker_color='#7C3AED'),
                         go.Bar(name='Recall', x=classes, y=recall, marker_color='#3B82F6')

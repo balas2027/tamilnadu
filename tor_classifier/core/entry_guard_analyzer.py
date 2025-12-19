@@ -74,6 +74,9 @@ class EntryGuardAnalyzer:
     6. WEAK: IAT patterns consistent with TOR
     """
     
+    # Class-level cache for live relay IPs from consensus
+    _live_relay_ips: set = set()
+    
     def __init__(self):
         """Initialize Entry Guard Analyzer."""
         # Custom relay IPs can be added here
@@ -83,15 +86,36 @@ class EntryGuardAnalyzer:
         """Add a custom relay IP address."""
         self.custom_relay_ips.add(ip)
     
+    @classmethod
+    def load_live_relays(cls, relay_ips: list):
+        """
+        Load live relay IPs from TOR consensus.
+        
+        Args:
+            relay_ips: List of relay IP addresses from consensus
+        """
+        cls._live_relay_ips = set(relay_ips)
+        print(f"[EntryGuardAnalyzer] Loaded {len(cls._live_relay_ips)} live relay IPs")
+    
+    @classmethod
+    def get_relay_count(cls) -> int:
+        """Get number of loaded relay IPs."""
+        return len(cls._live_relay_ips)
+    
     def _is_localhost(self, ip: str) -> bool:
         """Check if IP is localhost."""
         return ip in LOCALHOST_IPS or ip.startswith('127.')
     
     def _check_tor_ip(self, ip: str) -> bool:
-        """Check if IP is a known TOR relay."""
+        """Check if IP is a known TOR relay (static + live consensus)."""
+        # Check static prefixes
         if is_tor_relay(ip):
             return True
+        # Check custom added relays
         if ip in self.custom_relay_ips:
+            return True
+        # Check live consensus relays (class-level cache)
+        if ip in self._live_relay_ips:
             return True
         return False
     
@@ -342,12 +366,77 @@ class EntryGuardAnalyzer:
                 traffic_type = TrafficType.VPN
                 confidence = 0.7
         
+        # ===== ML Classification (Enhanced Detection) =====
+        # Use ML classifier for flows that haven't been definitively classified
+        if traffic_type == TrafficType.NON_TOR and confidence < 0.5:
+            try:
+                from models.ml_tor_classifier import get_ml_classifier, FlowStats
+                
+                # Build flow stats
+                total_packets = flow_info.get('total_packets', len(packet_sizes) if packet_sizes else 10)
+                total_bytes = flow_info.get('total_bytes', int(avg_size * total_packets) if avg_size else 5000)
+                duration = flow_info.get('duration', 1.0)
+                
+                ml_flow = FlowStats(
+                    src_ip=src_ip,
+                    dst_ip=dst_ip,
+                    src_port=src_port,
+                    dst_port=dst_port,
+                    protocol=6
+                )
+                ml_flow.duration = duration
+                ml_flow.total_bytes = total_bytes
+                ml_flow.total_packets = total_packets
+                ml_flow.packet_sizes = packet_sizes if packet_sizes else [int(avg_size)] * total_packets if avg_size else []
+                
+                # Generate synthetic timestamps based on IAT
+                if iat_mean > 0:
+                    for i in range(total_packets):
+                        ml_flow.timestamps.append(i * iat_mean)
+                        if i % 2 == 0:
+                            ml_flow.fwd_timestamps.append(i * iat_mean)
+                        else:
+                            ml_flow.bwd_timestamps.append(i * iat_mean)
+                
+                ml_clf = get_ml_classifier()
+                result = ml_clf.predict_flow(ml_flow)
+                
+                if result['is_tor'] and result['confidence'] > 0.6:
+                    traffic_type = TrafficType.TOR_BRIDGE  # ML detected TOR (likely bridge)
+                    confidence = result['confidence']
+                    indicators.append(f"🤖 ML Classification: TOR ({result['confidence']:.0%})")
+                    is_bridge = True
+                elif result['is_tor'] and result['confidence'] > 0.4:
+                    # Boost existing confidence
+                    confidence += 0.25
+                    indicators.append(f"🤖 ML boost: TOR-like patterns ({result['confidence']:.0%})")
+                    
+            except Exception as e:
+                pass  # ML not available, continue with rule-based
+        
+        # Also try ML for uncertain TOR classifications to boost confidence
+        if traffic_type in [TrafficType.TOR_ENTRY_GUARD, TrafficType.TOR_BRIDGE] and confidence < 0.7:
+            try:
+                from models.ml_tor_classifier import get_ml_classifier, FlowStats
+                ml_clf = get_ml_classifier()
+                
+                ml_flow = FlowStats(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port, dst_port=dst_port, protocol=6)
+                ml_flow.packet_sizes = packet_sizes if packet_sizes else [int(avg_size or 512)] * 10
+                ml_flow.duration = flow_info.get('duration', 1.0)
+                
+                result = ml_clf.predict_flow(ml_flow)
+                if result['is_tor']:
+                    confidence = max(confidence, result['confidence'])
+                    indicators.append(f"🤖 ML confirmed TOR ({result['confidence']:.0%})")
+            except:
+                pass
+        
         # Cap confidence at 1.0
         confidence = min(confidence, 1.0)
         
-        # Lower threshold for classification
+        # Lower threshold for classification - much more aggressive
         if traffic_type in [TrafficType.TOR_ENTRY_GUARD, TrafficType.TOR_BRIDGE, TrafficType.TOR_SOCKS]:
-            if confidence < 0.15:  # Very low threshold
+            if confidence < 0.10:  # Very very low threshold
                 traffic_type = TrafficType.NON_TOR
         
         return EntryGuardResult(
