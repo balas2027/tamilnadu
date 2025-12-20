@@ -1,0 +1,45 @@
+{
+  "report_metadata": {
+    "case_id": "TOR-TRACE-1766213211",
+    "analyst": "Automated Forensic Analyzer",
+    "description": "TOR Circuit Origin Trace",
+    "generated_at": "2025-12-20T12:16:51.945309",
+    "tool_version": "TOR-Forensics-v1.0"
+  },
+  "summary": {
+    "total_findings": 1,
+    "high_confidence_count": 1,
+    "medium_confidence_count": 0,
+    "low_confidence_count": 0,
+    "unique_origin_ips": [
+      "10.0.6.18"
+    ],
+    "unique_entry_guards": []
+  },
+  "findings": [
+    {
+      "finding_id": "TOR-1766213211-001",
+      "analysis_timestamp": "2025-12-20T12:16:51.945486",
+      "probable_origin_ip": "10.0.6.18",
+      "origin_confidence": 0.0,
+      "entry_guard_ip": "",
+      "entry_guard_nickname": "",
+      "entry_guard_port": 0,
+      "middle_relay_ip": "",
+      "middle_relay_nickname": "",
+      "exit_node_ip": "",
+      "exit_node_nickname": "",
+      "activity_purpose": "GENERAL",
+      "circuit_id": "",
+      "local_entry_timestamp": 1766213159.6211503,
+      "local_entry_formatted": "2025-12-20 12:15:59",
+      "composite_confidence_score": 0.875,
+      "identity_score": 0.0,
+      "fingerprint_score": 0.0,
+      "pattern_score": 0.0,
+      "log_reference_pointer": "Live TOR Control Port, Circuit #14",
+      "analyst_notes": "",
+      "classification": "TOR_TRAFFIC"
+    }
+  ]
+}

@@ -83,7 +83,8 @@ class TorConsensusUpdater:
                     'type': 'relay',
                     'running': 'true',
                     'fields': 'fingerprint,nickname,or_addresses,country,country_name,'
-                              'as,as_name,bandwidth,flags,first_seen,last_seen'
+                              'as,as_name,observed_bandwidth,advertised_bandwidth,bandwidth_rate,'
+                              'flags,first_seen,last_seen'
                 },
                 timeout=60,
                 headers={'User-Agent': 'TOR-Consensus-Updater/2.0'}
@@ -155,10 +156,9 @@ class TorConsensusUpdater:
             if 'Exit' in flags:
                 exits += 1
             
-            bw = relay.get('bandwidth', [0])
-            if isinstance(bw, list) and bw:
-                total_bw += bw[0]
-            elif isinstance(bw, (int, float)):
+            # Use observed_bandwidth first, fallback to advertised_bandwidth, then bandwidth
+            bw = relay.get('observed_bandwidth') or relay.get('advertised_bandwidth') or relay.get('bandwidth_rate') or 0
+            if isinstance(bw, (int, float)):
                 total_bw += bw
             
             country = relay.get('country_name', 'Unknown')

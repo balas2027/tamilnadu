@@ -340,6 +340,52 @@ COUNTRY_FLAGS = {
 }
 
 
+def cleanup_module_state(current_mode: str):
+    """
+    Clean up module-specific session state when switching modes.
+    This prevents data leakage between modules.
+    """
+    # Define keys for each module
+    module_keys = {
+        'synthetic': ['results', 'packets', 'synthetic_results'],
+        'traffic_analyzer': ['ta_results', 'ta_summary', 'ta_detector'],
+        'pcap': ['pcap_results', 'pcap_packets', 'pcap_flows'],
+        'live_capture': ['live_capture_active', 'live_packets', 'live_session', 'live_ingester'],
+        'global_monitor': ['tor_connected', 'forensic_flow', 'forensic_report'],
+        'network_wide': ['nw_running', 'nw_monitor', 'nw_detected_users', 'nw_stats']
+    }
+    
+    # Get previous mode
+    previous_mode = st.session_state.get('_previous_analysis_mode', '')
+    
+    # Only clean if mode changed
+    if previous_mode != current_mode and previous_mode:
+        # Clean all module keys except the current one
+        for module_name, keys in module_keys.items():
+            # Check if previous mode was this module
+            should_clean = False
+            if module_name == 'synthetic' and '🧪' in previous_mode:
+                should_clean = True
+            elif module_name == 'traffic_analyzer' and '📊' in previous_mode:
+                should_clean = True
+            elif module_name == 'pcap' and '📂' in previous_mode:
+                should_clean = True
+            elif module_name == 'live_capture' and '📡' in previous_mode:
+                should_clean = True
+            elif module_name == 'global_monitor' and '🌍' in previous_mode:
+                should_clean = True
+            elif module_name == 'network_wide' and '🌐' in previous_mode:
+                should_clean = True
+            
+            if should_clean:
+                for key in keys:
+                    if key in st.session_state:
+                        del st.session_state[key]
+    
+    # Update previous mode
+    st.session_state['_previous_analysis_mode'] = current_mode
+
+
 def get_country_flag(country_code: str) -> str:
     """Get flag emoji for country code."""
     if not country_code:
@@ -799,6 +845,9 @@ def main():
             help="Choose data source for analysis"
         )
         
+        # Clean up previous module's session state when switching modules
+        cleanup_module_state(analysis_mode)
+        
         st.markdown("---")
         
         if "🧪" in analysis_mode:
@@ -1154,8 +1203,8 @@ def main():
                         
                         results = analyze_traffic([p.to_dict() for p in packets], progress)
                         
-                        st.session_state['results'] = results
-                        st.session_state['packets'] = packets
+                        st.session_state['pcap_results'] = results
+                        st.session_state['pcap_packets'] = packets
                         
                         # Clean up
                         import os
@@ -1325,7 +1374,7 @@ def main():
                     updater.stop_updater()
             
             with col3:
-                search_query = st.text_input("🔍 Search", placeholder="Nickname, IP, AS...")
+                pass  # Removed search input
             
             with col4:
                 stats_obj = updater.get_stats()
@@ -1356,10 +1405,10 @@ def main():
                 
                 st.markdown("---")
                 
-                # Create tabs - Added Correlation Attack and Alerts
-                tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+                # Create tabs - Removed Search tab
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                     "📡 Capture & Analyze", "⚔️ Correlation Attack", "🚨 Alerts", 
-                    "🗺️ Countries", "🛡️ Guards", "🚪 Exits", "🔍 Search"
+                    "🗺️ Countries", "🛡️ Guards", "🚪 Exits"
                 ])
                 
                 with tab1:
@@ -2030,9 +2079,9 @@ def main():
                         st.info(f"Found {len(guards):,} Entry Guard relays")
                         
                         guard_data = []
-                        for g in sorted(guards, key=lambda x: -(x.get('bandwidth', [0])[0] if isinstance(x.get('bandwidth'), list) else x.get('bandwidth', 0)))[:50]:
-                            bw = g.get('bandwidth', [0])
-                            bw_val = bw[0] if isinstance(bw, list) else bw
+                        # Sort by observed_bandwidth
+                        for g in sorted(guards, key=lambda x: -(x.get('observed_bandwidth') or x.get('advertised_bandwidth') or 0))[:50]:
+                            bw_val = g.get('observed_bandwidth') or g.get('advertised_bandwidth') or 0
                             or_addr = g.get('or_addresses', [''])[0]
                             ip = or_addr.rsplit(':', 1)[0].strip('[]') if or_addr else g.get('address', '')
                             
@@ -2055,9 +2104,9 @@ def main():
                         st.info(f"Found {len(exits):,} Exit Node relays")
                         
                         exit_data = []
-                        for e in sorted(exits, key=lambda x: -(x.get('bandwidth', [0])[0] if isinstance(x.get('bandwidth'), list) else x.get('bandwidth', 0)))[:50]:
-                            bw = e.get('bandwidth', [0])
-                            bw_val = bw[0] if isinstance(bw, list) else bw
+                        # Sort by observed_bandwidth
+                        for e in sorted(exits, key=lambda x: -(x.get('observed_bandwidth') or x.get('advertised_bandwidth') or 0))[:50]:
+                            bw_val = e.get('observed_bandwidth') or e.get('advertised_bandwidth') or 0
                             or_addr = e.get('or_addresses', [''])[0]
                             ip = or_addr.rsplit(':', 1)[0].strip('[]') if or_addr else e.get('address', '')
                             
@@ -2071,37 +2120,6 @@ def main():
                         
                         import pandas as pd
                         st.dataframe(pd.DataFrame(exit_data), use_container_width=True, height=400)
-                
-                with tab7:
-                    if search_query:
-                        results = updater.search_relays(search_query)
-                        
-                        if results:
-                            st.success(f"Found {len(results)} matching relays")
-                            
-                            search_data = []
-                            for r in results[:50]:
-                                flags = r.get('flags', [])
-                                role = 'Guard' if 'Guard' in flags else ('Exit' if 'Exit' in flags else 'Relay')
-                                bw = r.get('bandwidth', [0])
-                                bw_val = bw[0] if isinstance(bw, list) else bw
-                                or_addr = r.get('or_addresses', [''])[0]
-                                ip = or_addr.rsplit(':', 1)[0].strip('[]') if or_addr else r.get('address', '')
-                                
-                                search_data.append({
-                                    'Nickname': r.get('nickname', 'Unknown'),
-                                    'Role': role,
-                                    'Country': r.get('country_name', 'Unknown'),
-                                    'IP': ip,
-                                    'Bandwidth (Mbps)': round(bw_val / 1_000_000, 2)
-                                })
-                            
-                            import pandas as pd
-                            st.dataframe(pd.DataFrame(search_data), use_container_width=True, height=400)
-                        else:
-                            st.warning("No matching relays found")
-                    else:
-                        st.info("Enter a search query to find relays")
                 
                 # Auto-refresh display
                 if updater.is_running():

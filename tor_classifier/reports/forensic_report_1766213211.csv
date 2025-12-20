@@ -1,0 +1,2 @@
+finding_id,analysis_timestamp,probable_origin_ip,origin_confidence,entry_guard_ip,entry_guard_nickname,middle_relay_ip,middle_relay_nickname,exit_node_ip,exit_node_nickname,activity_purpose,circuit_id,local_entry_formatted,composite_confidence_score,identity_score,fingerprint_score,pattern_score,log_reference_pointer,classification
+TOR-1766213211-001,2025-12-20T12:16:51.945486,10.0.6.18,0.0,,,,,,,GENERAL,,2025-12-20 12:15:59,0.875,0.0,0.0,0.0,"Live TOR Control Port, Circuit #14",TOR_TRAFFIC
