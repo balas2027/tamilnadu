@@ -2258,7 +2258,10 @@ def main():
                         })
                     
                     import pandas as pd
-                    st.dataframe(pd.DataFrame(user_data), use_container_width=True)
+                    if user_data:  # Only display if there's data
+                        st.dataframe(pd.DataFrame(user_data), use_container_width=True)
+                    else:
+                        st.info("No TOR users detected yet.")
                 
                 # Auto-refresh
                 time.sleep(2)
@@ -2299,7 +2302,8 @@ def main():
                     })
                 
                 import pandas as pd
-                st.dataframe(pd.DataFrame(user_data), use_container_width=True)
+                if user_data:  # Only display if there's data
+                    st.dataframe(pd.DataFrame(user_data), use_container_width=True)
                 
                 # Forensic Reports
                 st.markdown("### 📋 Forensic Reports")
